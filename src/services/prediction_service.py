@@ -1,7 +1,6 @@
 import os
 import time
 from datetime import datetime
-from typing import Optional
 
 from src.config.settings import get_settings
 from src.schemas.prediction import (
