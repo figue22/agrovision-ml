@@ -1,0 +1,7 @@
+raw/*.csv
+processed/*.csv
+splits/*.csv
+!raw/.gitkeep
+!processed/.gitkeep
+!splits/.gitkeep
+!processed/dataset_info.json
