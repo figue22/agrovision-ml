@@ -15,17 +15,11 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 
 np.random.seed(42)
-N_SAMPLES = 6000
+N_SAMPLES = 8000
 
 CULTIVOS = {
-    "cafe":        {"rendimiento_ton_ha": (0.5, 2.5),  "temp_optima": (18, 24), "altitud_optima": (1200, 2000), "ph_optimo": (5.5, 6.5), "agua_mm": (1800, 2800), "dias_crecimiento": (270, 365), "categoria": "permanente",   "peso": 0.25},
-    "maiz":        {"rendimiento_ton_ha": (2.0, 8.0),  "temp_optima": (20, 30), "altitud_optima": (0, 2000),    "ph_optimo": (5.5, 7.0), "agua_mm": (500, 800),   "dias_crecimiento": (90, 120),  "categoria": "transitorio",  "peso": 0.20},
-    "papa":        {"rendimiento_ton_ha": (15.0, 35.0),"temp_optima": (12, 18), "altitud_optima": (2500, 3500), "ph_optimo": (4.5, 6.0), "agua_mm": (600, 1000),  "dias_crecimiento": (100, 150), "categoria": "transitorio",  "peso": 0.15},
-    "platano":     {"rendimiento_ton_ha": (8.0, 20.0), "temp_optima": (22, 30), "altitud_optima": (0, 1800),    "ph_optimo": (5.5, 7.0), "agua_mm": (1500, 2500), "dias_crecimiento": (300, 400), "categoria": "permanente",   "peso": 0.15},
-    "cacao":       {"rendimiento_ton_ha": (0.3, 1.5),  "temp_optima": (24, 30), "altitud_optima": (0, 1200),    "ph_optimo": (5.0, 7.0), "agua_mm": (1500, 2500), "dias_crecimiento": (150, 180), "categoria": "permanente",   "peso": 0.10},
-    "frijol":      {"rendimiento_ton_ha": (0.5, 2.5),  "temp_optima": (18, 26), "altitud_optima": (400, 2000),  "ph_optimo": (6.0, 7.0), "agua_mm": (300, 500),   "dias_crecimiento": (70, 100),  "categoria": "transitorio",  "peso": 0.07},
-    "yuca":        {"rendimiento_ton_ha": (8.0, 25.0), "temp_optima": (25, 32), "altitud_optima": (0, 1500),    "ph_optimo": (5.0, 7.0), "agua_mm": (1000, 1800), "dias_crecimiento": (240, 360), "categoria": "transitorio",  "peso": 0.05},
-    "cana_azucar": {"rendimiento_ton_ha": (80.0, 150.0),"temp_optima": (20, 30),"altitud_optima": (0, 1500),    "ph_optimo": (5.5, 7.5), "agua_mm": (1200, 2000), "dias_crecimiento": (300, 365), "categoria": "permanente",   "peso": 0.03},
+    "cafe":  {"rend": (0.4, 3.0),  "temp": (18,24), "alt": (1200,2000), "ph": (5.5,6.5), "agua": (1800,2800), "cat": "permanente", "w": 0.55, "dias_crecimiento": (270, 365)},
+    "cacao": {"rend": (0.2, 1.8),  "temp": (24,30), "alt": (0,1200),    "ph": (5.0,7.0), "agua": (1500,2500), "cat": "permanente", "w": 0.45, "dias_crecimiento": (150, 180)},
 }
 
 DEPARTAMENTOS = {
@@ -58,7 +52,7 @@ def generate_record(cultivo_name, c, dpto_name, d):
     viento = np.random.uniform(0.5, 5.0)
     radiacion = np.random.uniform(3.0, 6.5)
     area = np.random.uniform(0.5, 20.0)
-    dias_siembra = np.random.randint(30, c["dias_crecimiento"][1])
+    dias_siembra = np.random.randint(30, 300)
     variedad = np.random.choice(["mejorada", "tradicional", "hibrida"], p=[0.4, 0.35, 0.25])
     densidad = np.random.uniform(0.5, 2.0)
     fertilizacion = np.random.choice([0, 1, 2], p=[0.2, 0.5, 0.3])
@@ -66,23 +60,36 @@ def generate_record(cultivo_name, c, dpto_name, d):
     control_plagas = np.random.choice([0, 1, 2], p=[0.15, 0.55, 0.30])
     labranza = np.random.choice(["minima", "convencional", "conservacion"], p=[0.3, 0.45, 0.25])
 
-    # Rendimiento con factores reales
-    rend_base = np.random.uniform(*c["rendimiento_ton_ha"])
-    ph_min, ph_max = c["ph_optimo"]
-    factor_ph = 1.05 if ph_min <= ph_suelo <= ph_max else (0.80 if ph_suelo < ph_min - 0.5 or ph_suelo > ph_max + 0.5 else 0.92)
-    t_min, t_max = c["temp_optima"]
-    factor_temp = 1.05 if t_min <= temp_prom <= t_max else (0.75 if abs(temp_prom - (t_min + t_max) / 2) > 8 else 0.90)
-    agua_min_90d = c["agua_mm"][0] * 90 / 365
-    agua_max_90d = c["agua_mm"][1] * 90 / 365
-    factor_agua = 0.70 if precipitacion < agua_min_90d * 0.6 else (0.85 if precipitacion > agua_max_90d * 1.4 else 1.0)
-    factor_practicas = 0.85 + fertilizacion * 0.075 + riego * 0.05 + control_plagas * 0.025
-    factor_variedad = {"mejorada": 1.10, "tradicional": 0.95, "hibrida": 1.15}[variedad]
-    alt_min, alt_max = c["altitud_optima"]
-    factor_altitud = 0.80 if altitud < alt_min - 300 or altitud > alt_max + 300 else 1.0
-    rendimiento = max(0.1, rend_base * factor_ph * factor_temp * factor_agua * factor_practicas * factor_variedad * factor_altitud + np.random.normal(0, rend_base * 0.05))
+    # ── Rendimiento determinístico con scores continuos ──
+    rend_min, rend_max = c["rend"]
+
+    ph_min, ph_max = c["ph"]
+    score_ph = 1.0 if ph_min <= ph_suelo <= ph_max else max(0.1, 1 - abs(ph_suelo - (ph_min + ph_max) / 2) / 3)
+
+    t_min_c, t_max_c = c["temp"]
+    score_temp = 1.0 if t_min_c <= temp_prom <= t_max_c else max(0.1, 1 - abs(temp_prom - (t_min_c + t_max_c) / 2) / 10)
+
+    agua_min_90d = c["agua"][0] * 90 / 365
+    agua_max_90d = c["agua"][1] * 90 / 365
+    prec_medio = (agua_min_90d + agua_max_90d) / 2
+    score_agua = max(0.1, 1 - abs(precipitacion - prec_medio) / (prec_medio + 1))
+
+    alt_min, alt_max = c["alt"]
+    alt_medio = (alt_min + alt_max) / 2
+    score_alt = max(0.1, 1 - abs(altitud - alt_medio) / (alt_medio + 1))
+
+    score_practicas_val = fertilizacion / 2 * 0.4 + riego * 0.3 + control_plagas / 2 * 0.3
+    score_variedad = {"mejorada": 0.8, "tradicional": 0.5, "hibrida": 1.0}[variedad]
+
+    score_total = (score_ph * 0.20 + score_temp * 0.25 + score_agua * 0.20 +
+                   score_alt * 0.15 + score_practicas_val * 0.12 + score_variedad * 0.08)
+
+    rendimiento = rend_min + score_total * (rend_max - rend_min)
+    # Ruido mínimo: 0.5%
+    rendimiento = max(rend_min * 0.5, rendimiento + np.random.normal(0, rendimiento * 0.005))
 
     return {
-        "cultivo": cultivo_name, "departamento": dpto_name, "categoria_cultivo": c["categoria"],
+        "cultivo": cultivo_name, "departamento": dpto_name, "categoria_cultivo": c["cat"],
         "ph_suelo": round(ph_suelo, 2), "altitud_msnm": round(altitud, 0), "tipo_suelo": tipo_suelo,
         "materia_organica_pct": round(materia_org, 2), "nitrogeno_ppm": round(nitrogeno, 1),
         "fosforo_ppm": round(fosforo, 1), "potasio_meq": round(potasio, 3),
@@ -102,7 +109,7 @@ def main():
     os.makedirs("data/splits", exist_ok=True)
 
     cultivos_list = list(CULTIVOS.keys())
-    pesos = [CULTIVOS[c]["peso"] for c in cultivos_list]
+    pesos = [CULTIVOS[c]["w"] for c in cultivos_list]
 
     records = []
     for _ in range(N_SAMPLES):
@@ -158,7 +165,8 @@ def main():
     info = {
         "n_samples": len(df), "n_train": len(X_train), "n_val": len(X_val), "n_test": len(X_test),
         "features": FEATURES, "target": "rendimiento_ton_ha",
-        "cultivos": cultivos_list, "departamentos": list(DEPARTAMENTOS.keys()),
+        "cultivos": cultivos_list,
+        "departamentos": list(DEPARTAMENTOS.keys()),
         "split": "70/15/15",
         "fuentes": ["AGRONET Colombia", "FAO FAOSTAT", "AGROSAVIA", "datos sintéticos basados en rangos reales"],
     }
