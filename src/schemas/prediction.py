@@ -27,6 +27,10 @@ class PredictionRequest(BaseModel):
     cultivo_parcela_id: str = Field(..., description="UUID del cultivo en parcela")
     tipo_cultivo_id: str = Field(..., description="UUID del tipo de cultivo")
     modelo: TipoModelo = Field(default=TipoModelo.ENSEMBLE, description="Tipo de modelo a usar")
+    datos_agronomicos: Optional[dict] = Field(
+        default=None,
+        description="Datos agronómicos del cultivo y parcela para la predicción",
+    )
 
     model_config = {"json_schema_extra": {
         "example": {
@@ -34,6 +38,20 @@ class PredictionRequest(BaseModel):
             "cultivo_parcela_id": "660e8400-e29b-41d4-a716-446655440001",
             "tipo_cultivo_id": "770e8400-e29b-41d4-a716-446655440002",
             "modelo": "ensemble",
+            "datos_agronomicos": {
+                "cultivo": "cafe",
+                "departamento": "Caldas",
+                "ph_suelo": 6.0,
+                "altitud_msnm": 1500,
+                "temp_promedio_c": 19,
+                "precipitacion_mm_90d": 450,
+                "humedad_promedio_pct": 78,
+                "area_sembrada_ha": 2.5,
+                "variedad": "mejorada",
+                "nivel_fertilizacion": 2,
+                "tiene_riego": 1,
+                "nivel_control_plagas": 2,
+            },
         }
     }}
 
