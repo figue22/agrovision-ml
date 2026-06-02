@@ -153,4 +153,3 @@ class FeatureEngineering:
 
     def get_temporal_feature_names(self) -> list:
         return FEATURES_TEMPORALES
-
