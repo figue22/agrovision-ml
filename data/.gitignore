@@ -1,0 +1,13 @@
+# Ignorar datasets grandes
+raw/*.csv
+processed/*.csv
+splits/*.csv
+models/*.joblib
+
+# Mantener estructura y metadata
+!raw/.gitkeep
+!processed/.gitkeep
+!splits/.gitkeep
+!models/.gitkeep
+!processed/dataset_info.json
+!models/xgboost_metrics.json
