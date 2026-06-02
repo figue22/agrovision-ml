@@ -1,14 +1,12 @@
 """
-HU-037 — Feature Engineering Pipeline
+HU-037/038 — Feature Engineering Pipeline
 Preprocesamiento de features para modelos XGBoost y LSTM
 """
 
-import json
-import os
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 
 # Features del modelo
 FEATURES_ESTATICAS = [
@@ -31,7 +29,7 @@ FEATURES_TEMPORALES = [
     "velocidad_viento_ms", "radiacion_solar_kwh",
 ]
 
-CULTIVOS_VALIDOS = ["cafe", "maiz", "papa", "platano", "cacao", "frijol", "yuca", "cana_azucar"]
+CULTIVOS_VALIDOS = ["cacao", "cafe"]
 DEPARTAMENTOS_VALIDOS = ["Antioquia", "Caldas", "Cauca", "Cundinamarca", "Huila",
                           "Meta", "Nariño", "Santander", "Tolima", "Valle"]
 TIPOS_SUELO = ["franco", "arcilloso", "arenoso", "franco_arcilloso", "franco_arenoso"]
@@ -54,12 +52,6 @@ class FeatureEngineering:
     def transform_request(self, data: Dict[str, Any]) -> np.ndarray:
         """
         Transforma un request de predicción en el vector de features.
-
-        Args:
-            data: Diccionario con los datos de entrada
-
-        Returns:
-            numpy array con las features listas para el modelo
         """
         cultivo = data.get("cultivo", "cafe")
         if cultivo not in CULTIVOS_VALIDOS:
@@ -84,11 +76,11 @@ class FeatureEngineering:
         categoria = data.get("categoria_cultivo", "transitorio")
 
         # Encodings
-        cultivo_enc = self.le_cultivo.transform([cultivo])[0]
-        dpto_enc = self.le_dpto.transform([departamento])[0]
-        suelo_enc = self.le_tipo_suelo.transform([tipo_suelo])[0]
-        variedad_enc = self.le_variedad.transform([variedad])[0]
-        labranza_enc = self.le_labranza.transform([labranza])[0]
+        cultivo_enc = int(self.le_cultivo.transform([cultivo])[0])
+        dpto_enc = int(self.le_dpto.transform([departamento])[0])
+        suelo_enc = int(self.le_tipo_suelo.transform([tipo_suelo])[0])
+        variedad_enc = int(self.le_variedad.transform([variedad])[0])
+        labranza_enc = int(self.le_labranza.transform([labranza])[0])
         es_permanente = 1 if categoria == "permanente" else 0
 
         # Features numéricas
@@ -116,8 +108,12 @@ class FeatureEngineering:
         # Features derivadas
         amplitud_termica = temp_max - temp_min
         indice_humedad = precipitacion / (dias_sin_lluvia + 1)
-        indice_fertilidad = (materia_org * 0.4 + nitrogeno / 60 * 0.3 + fosforo / 50 * 0.3)
-        score_practicas = (fertilizacion / 2 * 0.4 + riego * 0.3 + control_plagas / 2 * 0.3)
+        indice_fertilidad = (materia_org * 0.4 +
+                              nitrogeno / 60 * 0.3 +
+                              fosforo / 50 * 0.3)
+        score_practicas = (fertilizacion / 2 * 0.4 +
+                            riego * 0.3 +
+                            control_plagas / 2 * 0.3)
 
         features = np.array([[
             cultivo_enc, dpto_enc, suelo_enc, variedad_enc, labranza_enc, es_permanente,
@@ -135,17 +131,16 @@ class FeatureEngineering:
         Transforma serie de datos climáticos para el modelo LSTM.
 
         Args:
-            datos_clima: Lista de dicts con datos climáticos por día (últimos 90 días)
+            datos_clima: Lista de dicts con datos climáticos (últimos 30 días)
 
         Returns:
-            numpy array shape (1, timesteps, n_features)
+            numpy array shape (1, 30, n_features)
         """
         if not datos_clima:
-            # Retornar serie sintética si no hay datos
             return np.zeros((1, 30, len(FEATURES_TEMPORALES)), dtype=np.float32)
 
         rows = []
-        for d in datos_clima[-30:]:  # últimos 30 días
+        for d in datos_clima[-30:]:
             rows.append([
                 float(d.get("temp_promedio_c", 20)),
                 float(d.get("temp_maxima_c", 25)),
