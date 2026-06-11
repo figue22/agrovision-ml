@@ -76,7 +76,6 @@ CULTIVO_PARAMS: dict = {
 }
 
 
-
 class CropLSTM(nn.Module):
     def __init__(self, n_temporal, n_static, hidden_size=64, n_layers=2, dropout=0.2):
         super().__init__()
@@ -426,7 +425,7 @@ class PredictionService:
             fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
 
         logger.info(
-            "Cosecha estimada [%s]: ciclo_base=%d ajuste_temp=%+d ajuste_alt=%+d " \
+            "Cosecha estimada [%s]: ciclo_base=%d ajuste_temp=%+d ajuste_alt=%+d "
             "ajuste_rend=%+d → ciclo=%d días | restantes=%d",
             cultivo, ciclo_base, ajuste_temp, ajuste_alt, ajuste_rend, ciclo_estimado, dias_restantes
         )
