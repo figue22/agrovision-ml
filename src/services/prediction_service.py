@@ -376,8 +376,8 @@ class PredictionService:
 
         params = CULTIVO_PARAMS.get(cultivo, CULTIVO_PARAMS["platano"])
         ciclo_base = params["ciclo_base"]
-        temp_ref    = params["temp_ref"]
-        alt_ref     = params["alt_ref"]
+        temp_ref = params["temp_ref"]
+        alt_ref = params["alt_ref"]
         ajuste_100m = params["ajuste_alt_cada_100m"]
         rend_optimo = params["rend_optimo"]
 
@@ -509,7 +509,7 @@ class PredictionService:
             rendimiento = pred_lstm
             confianza = self._calcular_confianza(data, "lstm", None, pred_lstm)
         else:
-             # Sin modelo disponible — usar estimación por defecto del cultivo
+            # Sin modelo disponible — usar estimación por defecto del cultivo
             _cultivo_key = data.get("cultivo", "platano") if cultivo not in CULTIVO_PARAMS else cultivo
             params = CULTIVO_PARAMS.get(_cultivo_key, CULTIVO_PARAMS["platano"])
             rendimiento = params["rend_optimo"] * 0.6  # 60% del óptimo como estimación conservadora
