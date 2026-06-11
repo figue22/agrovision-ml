@@ -26,7 +26,7 @@ FEATURES_TEMPORALES = [
     "velocidad_viento_ms", "radiacion_solar_kwh",
 ]
 
-CULTIVOS_VALIDOS = ["cacao", "cafe"]
+CULTIVOS_VALIDOS = ["cacao", "platano"]
 DEPARTAMENTOS_VALIDOS = [
     "Antioquia", "Caldas", "Cauca", "Cundinamarca", "Huila",
     "Meta", "Nariño", "Santander", "Tolima", "Valle",
@@ -50,9 +50,9 @@ class FeatureEngineering:
 
     def transform_request(self, data: Dict[str, Any]) -> np.ndarray:
         """Transforma un request de predicción en el vector de features."""
-        cultivo = data.get("cultivo", "cafe")
+        cultivo = data.get("cultivo", "platano")
         if cultivo not in CULTIVOS_VALIDOS:
-            cultivo = "cafe"
+            cultivo = "platano"
 
         departamento = data.get("departamento", "Caldas")
         if departamento not in DEPARTAMENTOS_VALIDOS:

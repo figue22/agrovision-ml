@@ -39,7 +39,7 @@ class PredictionRequest(BaseModel):
             "tipo_cultivo_id": "770e8400-e29b-41d4-a716-446655440002",
             "modelo": "ensemble",
             "datos_agronomicos": {
-                "cultivo": "cafe",
+                "cultivo": "platano",
                 "departamento": "Caldas",
                 "ph_suelo": 6.0,
                 "altitud_msnm": 1500,
@@ -57,15 +57,14 @@ class PredictionRequest(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    """Respuesta con la predicción de rendimiento."""
     prediccion_id: Optional[str] = None
     parcela_id: str
     cultivo_parcela_id: str
     tipo_cultivo_id: str
     version_modelo: str
     tipo_modelo: str
-    rendimiento_predicho_ton: float = Field(..., description="Rendimiento predicho en toneladas/ha")
-    puntaje_confianza: float = Field(..., ge=0, le=100, description="Score de confianza 0-100")
+    rendimiento_predicho_ton: float
+    puntaje_confianza: float
     intervalo_conf_inferior: float
     intervalo_conf_superior: float
     nivel_riesgo: NivelRiesgo
@@ -73,6 +72,8 @@ class PredictionResponse(BaseModel):
     datos_clima_usados: dict = Field(default_factory=dict)
     importancia_features: dict = Field(default_factory=dict)
     fecha_prediccion: datetime
+    fecha_cosecha_estimada: Optional[datetime] = None
+    dias_para_cosecha: Optional[int] = None
 
 
 class ModelInfo(BaseModel):

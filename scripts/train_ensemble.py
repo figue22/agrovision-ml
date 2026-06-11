@@ -24,7 +24,7 @@ torch.manual_seed(42)
 DATA_DIR = "data"
 MODELS_DIR = "data/models"
 
-CULTIVOS = ["cafe", "cacao"]
+CULTIVOS = ["platano", "cacao"]
 DPTOS = ["Antioquia", "Caldas", "Cauca", "Cundinamarca", "Huila",
          "Meta", "Nariño", "Santander", "Tolima", "Valle"]
 SUELOS = ["franco", "arcilloso", "arenoso", "franco_arcilloso", "franco_arenoso"]

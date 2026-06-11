@@ -18,8 +18,26 @@ np.random.seed(42)
 N_SAMPLES = 8000
 
 CULTIVOS = {
-    "cafe":  {"rend": (0.4, 3.0),  "temp": (18,24), "alt": (1200,2000), "ph": (5.5,6.5), "agua": (1800,2800), "cat": "permanente", "w": 0.55, "dias_crecimiento": (270, 365)},
-    "cacao": {"rend": (0.2, 1.8),  "temp": (24,30), "alt": (0,1200),    "ph": (5.0,7.0), "agua": (1500,2500), "cat": "permanente", "w": 0.45, "dias_crecimiento": (150, 180)},
+    "platano": {
+        "rend": (10.0, 40.0),
+        "temp": (22, 30),
+        "alt": (0, 1500),
+        "ph": (5.5, 7.0),
+        "agua": (1200, 2500),
+        "cat": "permanente",
+        "w": 0.55,
+        "dias_crecimiento": (270, 365),
+    },
+    "cacao": {
+        "rend": (0.2, 1.8),
+        "temp": (24, 30),
+        "alt": (0, 1200),
+        "ph": (5.0, 7.0),
+        "agua": (1500, 2500),
+        "cat": "permanente",
+        "w": 0.45,
+        "dias_crecimiento": (150, 180),
+    },
 }
 
 DEPARTAMENTOS = {
