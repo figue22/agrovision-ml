@@ -75,6 +75,7 @@ CULTIVO_PARAMS: dict = {
     },
 }
 
+
 class CropLSTM(nn.Module):
     def __init__(self, n_temporal, n_static, hidden_size=64, n_layers=2, dropout=0.2):
         super().__init__()
@@ -99,6 +100,7 @@ class CropLSTM(nn.Module):
         static_out = self.static_fc(x_static)
         combined = torch.cat([context, static_out], dim=1)
         return self.fc(combined).squeeze(1)
+
 
 class PredictionService:
     """Servicio de predicción con modelos reales XGBoost + LSTM + Ensemble."""
