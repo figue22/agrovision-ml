@@ -333,21 +333,20 @@ class PredictionService:
 
         return fecha_cosecha, dias_restantes
 
-
     def _calcular_nivel_riesgo(self, rendimiento: float, cultivo: str) -> NivelRiesgo:
-            rangos = {
-                "platano": (10.0, 40.0),
-                "cacao": (0.2, 1.8),
-            }
-            rmin, rmax = rangos.get(cultivo, (0.5, 2.0))
-            pct = (rendimiento - rmin) / (rmax - rmin) if rmax > rmin else 0.5
-            if pct >= 0.75:
-                return NivelRiesgo.BAJO
-            elif pct >= 0.50:
-                return NivelRiesgo.MEDIO
-            elif pct >= 0.25:
-                return NivelRiesgo.ALTO
-            return NivelRiesgo.CRITICO
+        rangos = {
+            "platano": (10.0, 40.0),
+            "cacao": (0.2, 1.8),
+        }
+        rmin, rmax = rangos.get(cultivo, (0.5, 2.0))
+        pct = (rendimiento - rmin) / (rmax - rmin) if rmax > rmin else 0.5
+        if pct >= 0.75:
+            return NivelRiesgo.BAJO
+        elif pct >= 0.50:
+            return NivelRiesgo.MEDIO
+        elif pct >= 0.25:
+            return NivelRiesgo.ALTO
+        return NivelRiesgo.CRITICO
 
     async def predict(self, request: PredictionRequest) -> PredictionResponse:
         data = request.datos_agronomicos or {}
