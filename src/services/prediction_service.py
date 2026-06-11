@@ -25,7 +25,7 @@ from src.schemas.prediction import (
 
 logger = logging.getLogger("agrovision-ml")
 
-CULTIVOS = ["cafe", "cacao"]
+CULTIVOS = ["platano", "cacao"]
 DPTOS = ["Antioquia", "Caldas", "Cauca", "Cundinamarca", "Huila",
          "Meta", "Nariño", "Santander", "Tolima", "Valle"]
 SUELOS = ["franco", "arcilloso", "arenoso", "franco_arcilloso", "franco_arenoso"]
@@ -108,20 +108,23 @@ class PredictionService:
     def _load_models(self) -> None:
         model_path = os.environ.get("MODEL_PATH", "data/models")
 
-        # XGBoost
-        xgb_path = os.path.join(model_path, "xgboost_model.joblib")
-        if os.path.exists(xgb_path):
-            try:
-                self._xgb_model = joblib.load(xgb_path)
-                self._models_loaded["xgboost"] = True
-                logger.info("✅ XGBoost cargado: %s", xgb_path)
+        # XGBoost — modelos separados por cultivo
+        self._xgb_models = {}
+        for cultivo in CULTIVOS:
+            xgb_path = os.path.join(model_path, f"xgboost_{cultivo}.joblib")
+            if os.path.exists(xgb_path):
+                try:
+                    self._xgb_models[cultivo] = joblib.load(xgb_path)
+                    logger.info("✅ XGBoost[%s] cargado: %s", cultivo, xgb_path)
+                except Exception as e:
+                    logger.error("Error cargando XGBoost[%s]: %s", cultivo, e)
 
-                metrics_path = os.path.join(model_path, "xgboost_metrics.json")
-                if os.path.exists(metrics_path):
-                    with open(metrics_path) as f:
-                        self._xgb_metrics = json.load(f)
-            except Exception as e:
-                logger.error("Error cargando XGBoost: %s", e)
+        if self._xgb_models:
+            self._models_loaded["xgboost"] = True
+            metrics_path = os.path.join(model_path, "xgboost_metrics.json")
+            if os.path.exists(metrics_path):
+                with open(metrics_path) as f:
+                    self._xgb_metrics = json.load(f)
 
         # LSTM
         lstm_path = os.path.join(model_path, "lstm_model.pt")
@@ -156,9 +159,9 @@ class PredictionService:
 
     def _encode_features(self, data: dict) -> np.ndarray:
         """Transforma el request en vector de features para XGBoost."""
-        cultivo = data.get("cultivo", "cafe")
+        cultivo = data.get("cultivo", "platano")
         if cultivo not in CULTIVOS:
-            cultivo = "cafe"
+            cultivo = "platano"
         departamento = data.get("departamento", "Caldas")
         if departamento not in DPTOS:
             departamento = "Caldas"
@@ -216,7 +219,7 @@ class PredictionService:
     def _build_lstm_input(self, data: dict):
         """Construye la secuencia temporal para LSTM."""
         datos_clima = data.get("datos_clima", [])
-        cultivo = data.get("cultivo", "cafe")
+        cultivo = data.get("cultivo", "platano")
         departamento = data.get("departamento", "Caldas")
         variedad = data.get("variedad", "mejorada")
 
@@ -253,7 +256,7 @@ class PredictionService:
         seq_norm = scaler_t.transform(seq_arr)
 
         cultivo_enc = LabelEncoder().fit(CULTIVOS).transform(
-            [cultivo if cultivo in CULTIVOS else "cafe"])[0]
+            [cultivo if cultivo in CULTIVOS else "platano"])[0]
         dpto_enc = LabelEncoder().fit(DPTOS).transform(
             [departamento if departamento in DPTOS else "Caldas"])[0]
         variedad_enc = LabelEncoder().fit(VARIEDADES).transform(
@@ -280,36 +283,92 @@ class PredictionService:
             torch.FloatTensor(static_norm),
         )
 
-    def _calcular_nivel_riesgo(self, rendimiento: float, cultivo: str) -> NivelRiesgo:
-        rangos = {
-            "cafe": (0.8, 2.2),
-            "cacao": (0.4, 1.3),
+    def _calcular_fecha_cosecha(
+        self,
+        cultivo: str,
+        fecha_siembra: str | None,
+        dias_desde_siembra: int,
+        rendimiento: float,
+        temp_promedio: float,
+        altitud: float,
+    ) -> tuple:
+        from datetime import datetime, timedelta
+
+        CICLOS_BASE = {
+            "platano": 270,
+            "cacao": 150,
         }
-        rmin, rmax = rangos.get(cultivo, (0.5, 2.0))
-        pct = (rendimiento - rmin) / (rmax - rmin) if rmax > rmin else 0.5
-        if pct >= 0.75:
-            return NivelRiesgo.BAJO
-        elif pct >= 0.50:
-            return NivelRiesgo.MEDIO
-        elif pct >= 0.25:
-            return NivelRiesgo.ALTO
-        return NivelRiesgo.CRITICO
+
+        ciclo_base = CICLOS_BASE.get(cultivo, 270)
+
+        # Ajuste por temperatura
+        temp_ref = 25.0 if cultivo == "platano" else 26.0
+        ajuste_temp = int((temp_promedio - temp_ref) * (-3 if temp_promedio > temp_ref else -5))
+
+        # Ajuste por altitud: cada 100m sobre 500 msnm agrega 3 días
+        ajuste_alt = int(max(0, (altitud - 500) / 100) * 3)
+
+        # Ajuste por rendimiento
+        if cultivo == "platano":
+            rend_ref = 25.0
+            ajuste_rend = int((rend_ref - rendimiento) * 1.5)
+        else:
+            rend_ref = 0.8
+            ajuste_rend = int((rend_ref - rendimiento) * 10)
+
+        ciclo_estimado = ciclo_base + ajuste_temp + ajuste_alt + ajuste_rend
+        ciclo_estimado = max(ciclo_base - 45, min(ciclo_base + 90, ciclo_estimado))
+
+        dias_restantes = max(0, ciclo_estimado - dias_desde_siembra)
+
+        fecha_cosecha = None
+        if fecha_siembra:
+            try:
+                fs = datetime.fromisoformat(fecha_siembra.replace('Z', ''))
+                fecha_cosecha = fs + timedelta(days=ciclo_estimado)
+            except Exception:
+                fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
+        else:
+            fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
+
+        return fecha_cosecha, dias_restantes
+
+
+    def _calcular_nivel_riesgo(self, rendimiento: float, cultivo: str) -> NivelRiesgo:
+            rangos = {
+                "platano": (10.0, 40.0),
+                "cacao": (0.2, 1.8),
+            }
+            rmin, rmax = rangos.get(cultivo, (0.5, 2.0))
+            pct = (rendimiento - rmin) / (rmax - rmin) if rmax > rmin else 0.5
+            if pct >= 0.75:
+                return NivelRiesgo.BAJO
+            elif pct >= 0.50:
+                return NivelRiesgo.MEDIO
+            elif pct >= 0.25:
+                return NivelRiesgo.ALTO
+            return NivelRiesgo.CRITICO
 
     async def predict(self, request: PredictionRequest) -> PredictionResponse:
         data = request.datos_agronomicos or {}
         tipo_modelo = request.modelo
 
+        cultivo = data.get("cultivo", "platano")
+        if cultivo not in CULTIVOS:
+            cultivo = "platano"
+
         pred_xgb: Optional[float] = None
         pred_lstm: Optional[float] = None
         rendimiento: float = 1.0
 
-        # ── XGBoost ──
-        if self._xgb_model is not None:
+        # ── XGBoost — modelo específico del cultivo ──
+        if cultivo in self._xgb_models:
             try:
                 features = self._encode_features(data)
-                pred_xgb = float(self._xgb_model.predict(features)[0])
+                pred_xgb = float(self._xgb_models[cultivo].predict(features)[0])
+                logger.info("XGBoost[%s] predicción: %.3f ton/ha", cultivo, pred_xgb)
             except Exception as e:
-                logger.error("Error XGBoost predict: %s", e)
+                logger.error("Error XGBoost[%s] predict: %s", cultivo, e)
 
         # ── LSTM ──
         if self._lstm_model is not None:
@@ -317,6 +376,7 @@ class PredictionService:
                 x_seq, x_static = self._build_lstm_input(data)
                 with torch.no_grad():
                     pred_lstm = float(self._lstm_model(x_seq, x_static).item())
+                logger.info("LSTM predicción: %.3f ton/ha", pred_lstm)
             except Exception as e:
                 logger.error("Error LSTM predict: %s", e)
 
@@ -329,29 +389,57 @@ class PredictionService:
 
         if tipo_modelo == TipoModelo.XGBOOST and pred_xgb is not None:
             rendimiento = pred_xgb
+            confianza = 82.0
         elif tipo_modelo == TipoModelo.LSTM and pred_lstm is not None:
             rendimiento = pred_lstm
+            confianza = 78.0
         elif pred_xgb is not None and pred_lstm is not None:
             rendimiento = w_xgb * pred_xgb + w_lstm * pred_lstm
+            confianza = 87.0
         elif pred_xgb is not None:
             rendimiento = pred_xgb
+            confianza = 82.0
         elif pred_lstm is not None:
             rendimiento = pred_lstm
+            confianza = 78.0
         else:
-            rendimiento = 1.0
+            # Sin modelo disponible — usar estimación por defecto del cultivo
+            RENDIMIENTO_DEFAULT = {"platano": 20.0, "cacao": 0.8}
+            rendimiento = RENDIMIENTO_DEFAULT.get(cultivo, 20.0)
+            confianza = 50.0
+            logger.warning("Sin modelo disponible para %s, usando default: %.1f", cultivo, rendimiento)
 
         rendimiento = max(0.1, rendimiento)
 
-        # Intervalo de confianza (±10%)
-        inferior = round(rendimiento * 0.90, 3)
-        superior = round(rendimiento * 1.10, 3)
-        confianza = 85.0 if tipo_modelo == TipoModelo.ENSEMBLE else 80.0
+        # ── Intervalo de confianza basado en métricas reales ──
+        metricas_cultivo = (
+            self._xgb_metrics.get("metricas_por_cultivo", {}).get(cultivo, {})
+        )
+        rmse_pct = metricas_cultivo.get("rmse_pct", 5.0) / 100
+        inferior = round(max(0.1, rendimiento * (1 - rmse_pct * 2)), 3)
+        superior = round(rendimiento * (1 + rmse_pct * 2), 3)
 
-        cultivo = data.get("cultivo", "cafe")
         nivel_riesgo = self._calcular_nivel_riesgo(rendimiento, cultivo)
 
-        fi = self._xgb_metrics.get("feature_importance", {})
-        top_features = dict(list(fi.items())[:5]) if fi else {}
+        # Feature importance del modelo específico
+        fi_cultivo = (
+            self._xgb_metrics.get("metricas_por_cultivo", {})
+            .get(cultivo, {})
+            .get("feature_importance", {})
+        )
+        if not fi_cultivo:
+            fi_cultivo = self._xgb_metrics.get("feature_importance", {})
+        top_features = dict(list(fi_cultivo.items())[:5]) if fi_cultivo else {}
+
+        # ── Fecha de cosecha ──
+        fecha_cosecha_est, dias_para_cosecha = self._calcular_fecha_cosecha(
+            cultivo=cultivo,
+            fecha_siembra=data.get("fecha_siembra"),
+            dias_desde_siembra=int(data.get("dias_desde_siembra", 90)),
+            rendimiento=rendimiento,
+            temp_promedio=float(data.get("temp_promedio_c", 25.0)),
+            altitud=float(data.get("altitud_msnm", 500.0)),
+        )
 
         return PredictionResponse(
             parcela_id=request.parcela_id,
@@ -369,14 +457,23 @@ class PredictionService:
                 "nivel": nivel_riesgo.value,
                 "rendimiento_esperado_min": inferior,
                 "rendimiento_esperado_max": superior,
+                "dias_desde_siembra": int(data.get("dias_desde_siembra", 90)),
+                "modelo_usado": "xgboost" if pred_xgb is not None else "lstm" if pred_lstm is not None else "default",
             },
             datos_clima_usados={
                 "temp_promedio": data.get("temp_promedio_c"),
+                "temp_maxima": data.get("temp_maxima_c"),
+                "temp_minima": data.get("temp_minima_c"),
                 "precipitacion_mm_90d": data.get("precipitacion_mm_90d"),
                 "humedad_pct": data.get("humedad_promedio_pct"),
+                "altitud_msnm": data.get("altitud_msnm"),
+                "dias_sin_lluvia": data.get("dias_sin_lluvia"),
+                "registros_clima_usados": len(data.get("datos_clima", [])),
             },
             importancia_features=top_features,
             fecha_prediccion=datetime.utcnow(),
+            fecha_cosecha_estimada=fecha_cosecha_est,
+            dias_para_cosecha=dias_para_cosecha,
         )
 
     def get_available_models(self) -> list[ModelInfo]:

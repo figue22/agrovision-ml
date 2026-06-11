@@ -1,37 +1,37 @@
 {
   "model": "xgboost",
   "version": "1.0.0",
-  "n_estimators": 598,
-  "rmse_global_pct": 2.25,
-  "r2_global": 0.9956,
-  "rmse_promedio_por_cultivo_pct": 2.33,
+  "n_estimators": 594,
+  "rmse_global_pct": 2.84,
+  "r2_global": 0.9988,
+  "rmse_promedio_por_cultivo_pct": 15.1,
   "metricas_por_cultivo": {
-    "cafe": {
-      "rmse": 0.0438,
-      "rmse_pct": 2.06,
-      "mae": 0.0331,
-      "r2": 0.9831,
+    "platano": {
+      "rmse": 0.5489,
+      "rmse_pct": 1.99,
+      "mae": 0.408,
+      "r2": 0.9842,
       "n": 689
     },
     "cacao": {
-      "rmse": 0.0289,
-      "rmse_pct": 2.6,
-      "mae": 0.0213,
-      "r2": 0.9796,
+      "rmse": 0.3145,
+      "rmse_pct": 28.22,
+      "mae": 0.2427,
+      "r2": -1.4104,
       "n": 511
     }
   },
   "feature_importance": {
-    "cultivo_enc": 0.8382,
-    "temp_promedio_c": 0.0643,
-    "departamento_enc": 0.0217,
-    "ph_suelo": 0.0118,
-    "precipitacion_mm_90d": 0.0104,
-    "score_practicas": 0.0092,
-    "altitud_msnm": 0.0087,
-    "temp_minima_c": 0.0062,
-    "variedad_enc": 0.0058,
-    "tiene_riego": 0.0056
+    "cultivo_enc": 0.9496,
+    "temp_promedio_c": 0.0166,
+    "altitud_msnm": 0.0038,
+    "temp_minima_c": 0.003,
+    "precipitacion_mm_90d": 0.0028,
+    "ph_suelo": 0.0027,
+    "tiene_riego": 0.0024,
+    "score_practicas": 0.0018,
+    "temp_maxima_c": 0.0016,
+    "variedad_enc": 0.0014
   },
   "criteria_met": {
     "rmse_lt_15pct": true,
