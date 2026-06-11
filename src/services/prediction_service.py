@@ -59,6 +59,23 @@ FEATURES_ESTATICAS_LSTM = [
 
 SEQ_LEN = 30
 
+# ── Parámetros agronómicos reales por cultivo (AGRONET / AGROSAVIA Colombia) ──
+CULTIVO_PARAMS: dict = {
+    "platano": {
+        "ciclo_base": 300, "ciclo_min": 240, "ciclo_max": 420,
+        "temp_ref": 26.0, "gdd_base": 14.0,
+        "ajuste_alt_cada_100m": 4, "alt_ref": 500,
+        "rend_optimo": 30.0, "rend_min_absoluto": 6.0,
+    },
+    "cacao": {
+        "ciclo_base": 160, "ciclo_min": 140, "ciclo_max": 200,
+        "temp_ref": 27.0, "gdd_base": 15.0,
+        "ajuste_alt_cada_100m": 3, "alt_ref": 300,
+        "rend_optimo": 1.2, "rend_min_absoluto": 0.15,
+    },
+}
+
+
 
 class CropLSTM(nn.Module):
     def __init__(self, n_temporal, n_static, hidden_size=64, n_layers=2, dropout=0.2):
@@ -283,6 +300,61 @@ class PredictionService:
             torch.FloatTensor(static_norm),
         )
 
+    def _calcular_confianza(
+        self,
+        data: dict,
+        tipo_modelo: str,
+        pred_xgb: Optional[float],
+        pred_lstm: Optional[float],
+    ) -> float:
+        """
+        Calcula la confianza de forma dinámica según:
+        1. Completitud de los datos de entrada (más datos = más confianza)
+        2. Consistencia entre modelos (si xgb y lstm coinciden = más confianza)
+        3. Confianza base por tipo de modelo
+        """
+        # Confianza base por tipo de modelo
+        base = {"xgboost": 75.0, "lstm": 70.0, "ensemble": 80.0}.get(tipo_modelo, 70.0)
+
+        # ── Bonus por completitud de datos (+15 puntos máximo) ──
+        campos_criticos = [
+            "ph_suelo", "altitud_msnm", "temp_promedio_c",
+            "precipitacion_mm_90d", "humedad_promedio_pct",
+            "nitrogeno_ppm", "fosforo_ppm", "potasio_meq",
+        ]
+        campos_opcionales = [
+            "materia_organica_pct", "dias_sin_lluvia", "velocidad_viento_ms",
+            "radiacion_solar_kwh", "nivel_fertilizacion", "tiene_riego",
+            "nivel_control_plagas", "variedad",
+        ]
+        presentes_criticos = sum(1 for c in campos_criticos if data.get(c) is not None)
+        presentes_opcionales = sum(1 for c in campos_opcionales if data.get(c) is not None)
+        bonus_completitud = (presentes_criticos / len(campos_criticos)) * 10.0
+        bonus_completitud += (presentes_opcionales / len(campos_opcionales)) * 5.0
+
+        # ── Bonus por consistencia entre modelos (+5 puntos) ──
+        bonus_consistencia = 0.0
+        if pred_xgb is not None and pred_lstm is not None:
+            diferencia_pct = abs(pred_xgb - pred_lstm) / max(pred_xgb, pred_lstm, 0.001)
+            if diferencia_pct < 0.10:
+                bonus_consistencia = 5.0   # modelos muy alineados
+            elif diferencia_pct < 0.25:
+                bonus_consistencia = 2.5
+            else:
+                bonus_consistencia = 0.0   # modelos discrepan mucho
+
+        # ── Penalización por datos climáticos serie vacía ──
+        penalizacion_serie = 0.0
+        if tipo_modelo in ("lstm", "ensemble"):
+            n_registros = len(data.get("datos_clima", []))
+            if n_registros == 0:
+                penalizacion_serie = 8.0   # usando valores estáticos interpolados
+            elif n_registros < 15:
+                penalizacion_serie = 4.0   # serie incompleta
+
+        confianza = base + bonus_completitud + bonus_consistencia - penalizacion_serie
+        return round(max(40.0, min(97.0, confianza)), 1)
+
     def _calcular_fecha_cosecha(
         self,
         cultivo: str,
@@ -292,61 +364,96 @@ class PredictionService:
         temp_promedio: float,
         altitud: float,
     ) -> tuple:
+        """
+        Estima la fecha de cosecha usando modelo agronómico real:
+        - Ciclo base por cultivo (AGRONET / AGROSAVIA Colombia)
+        - Ajuste térmico: temperatura afecta velocidad de desarrollo
+        - Ajuste altitudinal: a mayor altura, ciclos más largos
+        - Ajuste por rendimiento predicho: bajo rendimiento puede indicar
+          desarrollo más lento por estrés
+        """
         from datetime import datetime, timedelta
 
-        CICLOS_BASE = {
-            "platano": 270,
-            "cacao": 150,
-        }
+        params = CULTIVO_PARAMS.get(cultivo, CULTIVO_PARAMS["platano"])
+        ciclo_base = params["ciclo_base"]
+        temp_ref    = params["temp_ref"]
+        alt_ref     = params["alt_ref"]
+        ajuste_100m = params["ajuste_alt_cada_100m"]
+        rend_optimo = params["rend_optimo"]
 
-        ciclo_base = CICLOS_BASE.get(cultivo, 270)
-
-        # Ajuste por temperatura
-        temp_ref = 25.0 if cultivo == "platano" else 26.0
-        ajuste_temp = int((temp_promedio - temp_ref) * (-3 if temp_promedio > temp_ref else -5))
-
-        # Ajuste por altitud: cada 100m sobre 500 msnm agrega 3 días
-        ajuste_alt = int(max(0, (altitud - 500) / 100) * 3)
-
-        # Ajuste por rendimiento
-        if cultivo == "platano":
-            rend_ref = 25.0
-            ajuste_rend = int((rend_ref - rendimiento) * 1.5)
+        # ── Ajuste por temperatura (GDD simplificado) ──
+        # Por cada grado por debajo de temp_ref, el cultivo tarda ~2% más
+        # Por encima de temp_ref (>3°C), hay estrés por calor: también retarda
+        delta_temp = temp_promedio - temp_ref
+        if delta_temp < 0:
+            # Frío: ralentiza crecimiento linealmente
+            ajuste_temp = int(abs(delta_temp) * ciclo_base * 0.018)
+        elif delta_temp > 3:
+            # Calor excesivo: estrés que también retarda
+            ajuste_temp = int((delta_temp - 3) * ciclo_base * 0.01)
         else:
-            rend_ref = 0.8
-            ajuste_rend = int((rend_ref - rendimiento) * 10)
+            ajuste_temp = 0  # rango óptimo
 
+        # ── Ajuste por altitud ──
+        alt_sobre_ref = max(0, altitud - alt_ref)
+        ajuste_alt = int((alt_sobre_ref / 100) * ajuste_100m)
+
+        # ── Ajuste por rendimiento predicho ──
+        # Si el rendimiento está por debajo del 60% del óptimo → estrés → ciclo más largo
+        ratio_rend = rendimiento / rend_optimo if rend_optimo > 0 else 1.0
+        if ratio_rend < 0.6:
+            ajuste_rend = int((0.6 - ratio_rend) * ciclo_base * 0.12)
+        elif ratio_rend > 1.0:
+            # Rendimiento excelente, puede indicar ciclo ligeramente más corto
+            ajuste_rend = -int((ratio_rend - 1.0) * ciclo_base * 0.05)
+        else:
+            ajuste_rend = 0
+
+        # ── Ciclo estimado con límites agronómicos ──
         ciclo_estimado = ciclo_base + ajuste_temp + ajuste_alt + ajuste_rend
-        ciclo_estimado = max(ciclo_base - 45, min(ciclo_base + 90, ciclo_estimado))
+        ciclo_estimado = max(params["ciclo_min"], min(params["ciclo_max"], ciclo_estimado))
 
         dias_restantes = max(0, ciclo_estimado - dias_desde_siembra)
 
-        fecha_cosecha = None
+        # ── Calcular fecha absoluta ──
         if fecha_siembra:
             try:
-                fs = datetime.fromisoformat(fecha_siembra.replace('Z', ''))
+                fs = datetime.fromisoformat(fecha_siembra.replace("Z", "+00:00"))
                 fecha_cosecha = fs + timedelta(days=ciclo_estimado)
             except Exception:
                 fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
         else:
             fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
 
+        logger.info(
+            "Cosecha estimada [%s]: ciclo_base=%d ajuste_temp=%+d ajuste_alt=%+d ajuste_rend=%+d → ciclo=%d días | restantes=%d",
+            cultivo, ciclo_base, ajuste_temp, ajuste_alt, ajuste_rend, ciclo_estimado, dias_restantes
+        )
         return fecha_cosecha, dias_restantes
 
     def _calcular_nivel_riesgo(self, rendimiento: float, cultivo: str) -> NivelRiesgo:
-        rangos = {
-            "platano": (10.0, 40.0),
-            "cacao": (0.2, 1.8),
-        }
-        rmin, rmax = rangos.get(cultivo, (0.5, 2.0))
-        pct = (rendimiento - rmin) / (rmax - rmin) if rmax > rmin else 0.5
-        if pct >= 0.75:
-            return NivelRiesgo.BAJO
-        elif pct >= 0.50:
+        """
+        Calcula el nivel de riesgo como porcentaje del rendimiento óptimo del cultivo.
+        Más preciso que usar rangos absolutos: un rendimiento de 10 ton/ha es
+        excelente para cacao pero crítico para plátano.
+        """
+        params = CULTIVO_PARAMS.get(cultivo, CULTIVO_PARAMS["platano"])
+        rend_optimo = params["rend_optimo"]
+        rend_min    = params["rend_min_absoluto"]
+
+        if rend_optimo <= rend_min:
             return NivelRiesgo.MEDIO
-        elif pct >= 0.25:
-            return NivelRiesgo.ALTO
-        return NivelRiesgo.CRITICO
+
+        # Porcentaje sobre el rango viable del cultivo
+        ratio = (rendimiento - rend_min) / (rend_optimo - rend_min)
+
+        if ratio >= 0.75:
+            return NivelRiesgo.BAJO      # ≥ 75% del óptimo
+        elif ratio >= 0.50:
+            return NivelRiesgo.MEDIO     # 50–75% del óptimo
+        elif ratio >= 0.25:
+            return NivelRiesgo.ALTO      # 25–50% del óptimo
+        return NivelRiesgo.CRITICO       # < 25% del óptimo
 
     async def predict(self, request: PredictionRequest) -> PredictionResponse:
         data = request.datos_agronomicos or {}
@@ -388,25 +495,26 @@ class PredictionService:
 
         if tipo_modelo == TipoModelo.XGBOOST and pred_xgb is not None:
             rendimiento = pred_xgb
-            confianza = 82.0
+            confianza = self._calcular_confianza(data, "xgboost", pred_xgb, None)
         elif tipo_modelo == TipoModelo.LSTM and pred_lstm is not None:
             rendimiento = pred_lstm
-            confianza = 78.0
+            confianza = self._calcular_confianza(data, "lstm", None, pred_lstm)
         elif pred_xgb is not None and pred_lstm is not None:
             rendimiento = w_xgb * pred_xgb + w_lstm * pred_lstm
-            confianza = 87.0
+            confianza = self._calcular_confianza(data, "ensemble", pred_xgb, pred_lstm)
         elif pred_xgb is not None:
             rendimiento = pred_xgb
-            confianza = 82.0
+            confianza = self._calcular_confianza(data, "xgboost", pred_xgb, None)
         elif pred_lstm is not None:
             rendimiento = pred_lstm
-            confianza = 78.0
+            confianza = self._calcular_confianza(data, "lstm", None, pred_lstm)
         else:
-            # Sin modelo disponible — usar estimación por defecto del cultivo
-            RENDIMIENTO_DEFAULT = {"platano": 20.0, "cacao": 0.8}
-            rendimiento = RENDIMIENTO_DEFAULT.get(cultivo, 20.0)
-            confianza = 50.0
-            logger.warning("Sin modelo disponible para %s, usando default: %.1f", cultivo, rendimiento)
+             # Sin modelo disponible — usar estimación por defecto del cultivo
+            _cultivo_key = data.get("cultivo", "platano") if cultivo not in CULTIVO_PARAMS else cultivo
+            params = CULTIVO_PARAMS.get(_cultivo_key, CULTIVO_PARAMS["platano"])
+            rendimiento = params["rend_optimo"] * 0.6  # 60% del óptimo como estimación conservadora
+            confianza = 40.0
+            logger.warning("Sin modelo disponible para %s, usando default conservador: %.1f", cultivo, rendimiento)
 
         rendimiento = max(0.1, rendimiento)
 
