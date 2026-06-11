@@ -426,7 +426,8 @@ class PredictionService:
             fecha_cosecha = datetime.utcnow() + timedelta(days=dias_restantes)
 
         logger.info(
-            "Cosecha estimada [%s]: ciclo_base=%d ajuste_temp=%+d ajuste_alt=%+d ajuste_rend=%+d → ciclo=%d días | restantes=%d",
+            "Cosecha estimada [%s]: ciclo_base=%d ajuste_temp=%+d ajuste_alt=%+d " \
+            "ajuste_rend=%+d → ciclo=%d días | restantes=%d",
             cultivo, ciclo_base, ajuste_temp, ajuste_alt, ajuste_rend, ciclo_estimado, dias_restantes
         )
         return fecha_cosecha, dias_restantes
@@ -439,7 +440,7 @@ class PredictionService:
         """
         params = CULTIVO_PARAMS.get(cultivo, CULTIVO_PARAMS["platano"])
         rend_optimo = params["rend_optimo"]
-        rend_min    = params["rend_min_absoluto"]
+        rend_min = params["rend_min_absoluto"]
 
         if rend_optimo <= rend_min:
             return NivelRiesgo.MEDIO
